@@ -54,7 +54,7 @@ struct elf_siginfo
  * not support and which gdb doesn't really use excluded.
  * Fields present but not used are marked with "XXX".
  */
-struct elf_prstatus
+typedef struct elf_prstatus
 {
 #if 0
 	long	pr_flags;	/* XXX Process flags */
@@ -93,6 +93,6 @@ struct elf_prstatus
 	unsigned long pr_interp_fdpic_loadmap;
 #endif
 	int pr_fpvalid;		/* True if math co-processor being used.  */
-};
+} elf_prstatus;
 
 #endif // READ_PC_h
