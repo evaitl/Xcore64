@@ -358,7 +358,11 @@ static void print_backtrace(const void *mp){
     }
     printf("\n\n");
 }
-/*
+/**
+   \param[in] mp the beginning of an elf file. 
+
+   Fetch the siginfo note from an elf core file and print it. 
+
   This one is problematic. I'm guessing from the sigaction manpage,
   but I haven't looked at the kernel source to see which fields in the
   sigaction_t union are actually being filled out. 
@@ -416,6 +420,12 @@ static void print_signal_info(const void *mp){
     }
     printf("\n\n");
 }
+
+/**
+   \param[in] mp the beginning of an elf file. 
+   
+   Fetch the prpsinfo note from the elf file and print it. 
+ */
 static void print_prog_info(const void *mp){
     const elf_prpsinfo_t *pi=get_note(mp,NT_PRPSINFO);
     if(!pi){
@@ -439,7 +449,10 @@ static void print_prog_info(const void *mp){
 
     printf("\n\n");
 }
-
+/**
+   \param ptype The type field from a program header.
+   \return a string to print. May be a static buffer. 
+ */
 static const char *ph_type_str(int ptype){
     static char buf[50];
     switch(ptype){
@@ -462,6 +475,10 @@ static const char *ph_type_str(int ptype){
     }
     return buf;
 }
+/**
+   \param flags The flag field from a program header. 
+   \return a static buffer
+ */
 static const char *ph_flags(int flags){
     static char buf[50];
     snprintf(buf,sizeof(buf),"%c%c%c",
@@ -470,6 +487,10 @@ static const char *ph_flags(int flags){
              (flags & 0x04 ? 'X': ' '));
     return buf;
 }
+
+/**
+   \param[in] ph The program header to print
+ */
 static void print_ph(const Elf64_Phdr *ph){
     printf(" %-10s0x%016lx 0x%016lx %016lx\n"
            "           0x%016lx 0x%016lx %-6s"
@@ -480,6 +501,13 @@ static void print_ph(const Elf64_Phdr *ph){
            ph_flags(ph->p_flags),ph->p_align);
 }
 
+/**
+   \param[in] vp The beginning of an elf file.
+   
+   In a perfect world, the elf header would be called a program header
+   and a program header would be called a segment header. This isn't a
+   perfect world.   This prints all of the program headers in the elf file. 
+ */
 static void print_segments(const void *vp){
     printf("Program Headers:\n");
     const Elf64_Ehdr *eh=vp;
@@ -492,6 +520,12 @@ static void print_segments(const void *vp){
         print_ph(ph);
     }
 }
+
+/**
+   \param[in] cp  The string to print.
+   \return a string for printing. 
+   Prints 16 bytes to a buffer and returns it. 
+ */
 static char *hexstr(const unsigned char *cp){
     static char buf[80];
     snprintf(buf,sizeof(buf),
@@ -545,6 +579,12 @@ static void print_file(const void *vp){
            "shstrndx:",eh->e_shstrndx);
     printf("\n\n");
 }
+
+/**
+   \param[in] mp The head of the file
+
+   Make sure we are looking at an x86_64 lsb elf core, or die.
+ */
 static void check_file(const void *mp){
     // magic for 64 bit little endian elf. 
     static char magic_ident[]="\x7f""ELF\x02\x01\x01";
