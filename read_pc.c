@@ -121,7 +121,7 @@ static uint64_t roundup8(uint64_t p){
     [Elf 64 object file format] (https://www.uclibc.org/docs/elf-64-gen.pdf)
 
 */
-elf_prstatus *get_prstatus(void *vp){
+void *get_note(void *vp, int nt_type){
     // magic for 64 bit little endian elf. 
     char magic_ident[]="\x7f""ELF\x02\x01\x01";
     if(memcmp(magic_ident, vp, 7)){
@@ -140,7 +140,7 @@ elf_prstatus *get_prstatus(void *vp){
             void *note_end=current_note;
             note_end += 3*sizeof(Elf64_Word);
             note_end += roundup8(current_note->n_namesz);
-            if(current_note->n_type == NT_PRSTATUS){
+            if(current_note->n_type == nt_type){
                 return note_end;
             }
             note_end += roundup8(current_note->n_descsz);
@@ -163,7 +163,7 @@ int main(int argc, char **argv){
     size_t len=get_len(fd);
     void *mp=Mmap(0,len,PROT_READ,MAP_PRIVATE,fd,0);
 
-    elf_prstatus * prs = get_prstatus(mp);
+    elf_prstatus * prs = get_note(mp,NT_PRSTATUS);
     if(!prs){
         die("No prstatus note found. ");
     }
