@@ -175,11 +175,11 @@ static const void *get_note(const void *vp, int nt_type){
    Say usage and die.
 */
 static void usage(void){
-    die("usage: read_pc [-b] [-i] [-p] [-r] [-s] [-t] core\n"
-        "    -f file headers\n"
+    die("usage: read_pc [-b] [-f] [-i] [-p] [-r] [-s] [-t] core\n"
         "    -b backtrace\n"
-        "    -p program headers\n"
+        "    -f file headers\n"
         "    -i program info\n"
+        "    -p program headers\n"
         "    -r general registers\n"
         "    -s signal info\n"
         "    -t program status\n"
