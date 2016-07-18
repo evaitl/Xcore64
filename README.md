@@ -1,12 +1,23 @@
 # read_pc
 
-Simple program that mmaps a core file named on the command line and dumps the registers. 
-Only for an x86_64 linux system.
+Simple program that mmaps a core file named on the command line and
+dumps the registers.  Only for an x86_64 linux system.
 
-Very early stage, I'm gradually adding stuff that it dumps:
-
+Very early stage, I'm gradually adding stuff that it dumps. Here is
+the current output:
 
 ```
+evaitl@bb ~/se/read_pc $ cat foo.c 
+#include <stdio.h>
+int main(){
+    for(int i=0; i<10; ++i){
+        printf("%d\n",i);
+        if(i==3){
+            *(int *)i=3;
+        }
+    }
+    return 0;
+}
 evaitl@bb ~/se/read_pc $ ./read_pc 
 usage: read_pc [-b] [-i] [-r] [-s] [-t] core
     -b backtrace
@@ -41,9 +52,17 @@ cutime: 0.000000 cstime 0.000000
 fpvalid: 1
 
 
+Signal Information: 
+signo: 11 errno 0 code 1
+addr 0x3 addr_lsb 0 addr_bnd ((nil), (nil))
+
+
 Process Information:
 state 0 (R) zombie 0 nice 0 flags 0x400600
 uid 1000 gid 1000 pid 4154 ppid 2932 pgrp 4154 sid 2932
 fname: foo
 args: ./foo 
+
+
+All worked
 ```

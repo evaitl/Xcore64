@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdarg.h>
+#include <signal.h>
 
 #include "read_pc.h"
 
@@ -181,34 +182,34 @@ static void parse_options(int argc, char **argv){
         }
     }
     if(argc-optind !=1){
-	usage();
+        usage();
     }
 }
 static void print_prstatus(elf_prstatus_t *prs){
     assert(prs);
     printf("Program status: \n");
     printf("signo %d signal code %d errno %d\n",
-	   prs->pr_info.si_signo, 
-	   prs->pr_info.si_code, 
-	   prs->pr_info.si_errno);
+           prs->pr_info.si_signo, 
+           prs->pr_info.si_code, 
+           prs->pr_info.si_errno);
     printf("cursig %d sigpend %#018lx sigheld %#018lx\n",
-	   prs->pr_cursig,
-	   prs->pr_sigpend,
-	   prs->pr_sighold);
+           prs->pr_cursig,
+           prs->pr_sigpend,
+           prs->pr_sighold);
     printf("pid %d ppid %d pgrp %d sid %d\n",
-	   prs->pr_pid,prs->pr_ppid,
-	   prs->pr_pgrp,prs->pr_sid);
+           prs->pr_pid,prs->pr_ppid,
+           prs->pr_pgrp,prs->pr_sid);
     // times...
     printf("utime: %ld.%06ld stime %ld.%06ld\n",
-	   prs->pr_utime.tv_sec,
-	   prs->pr_utime.tv_usec,
-	   prs->pr_stime.tv_sec,
-	   prs->pr_stime.tv_usec);
+           prs->pr_utime.tv_sec,
+           prs->pr_utime.tv_usec,
+           prs->pr_stime.tv_sec,
+           prs->pr_stime.tv_usec);
     printf("cutime: %ld.%06ld cstime %ld.%06ld\n",
-	   prs->pr_cutime.tv_sec,
-	   prs->pr_cutime.tv_usec,
-	   prs->pr_cstime.tv_sec,
-	   prs->pr_cstime.tv_usec);
+           prs->pr_cutime.tv_sec,
+           prs->pr_cutime.tv_usec,
+           prs->pr_cstime.tv_sec,
+           prs->pr_cstime.tv_usec);
     printf("fpvalid: %d\n",prs->pr_fpvalid);
     printf("\n\n");
 }
@@ -262,8 +263,63 @@ static void print_regs(elf_prstatus_t *prs){
 static void print_backtrace(void *mp){
     assert(mp);
 }
+/*
+  This one is problematic. I'm guessing from the sigaction manpage,
+  but I haven't looked at the kernel source to see which fields in the
+  sigaction_t union are actually being filled out. 
+
+  Use at your own risk. 
+ */
 static void print_signal_info(void *mp){
     assert(mp);
+    printf("Signal Information: \n");
+    siginfo_t *si=get_note(mp,NT_SIGINFO);
+    assert(si);
+    printf("signo: %d errno %d code %d\n",
+           si->si_signo, si->si_errno, si->si_code);
+    switch(si->si_code){
+    case SI_TKILL:
+    case SI_USER: // kill(2)
+        printf("pid %d uid %d\n", si->si_pid, si->si_uid);
+        return;
+    case SI_TIMER: // posix timer
+        printf("tid %d overrun %d sigval %d\n",
+               si->si_timerid, si->si_overrun,
+               si->_sifields._timer.si_sigval.sival_int);
+        return;
+    default:
+        break;
+    }
+    switch(si->si_signo){
+    case SIGCHLD: // pid, uid , status, utime, stime.
+        printf("pid %d uid %d status %d utime %ld stime %ld\n",
+               si->si_pid,si->si_uid,
+               si->si_status,
+               si->si_utime,
+               si->si_stime
+            );
+        break;
+    case SIGILL:
+    case SIGFPE:
+    case SIGSEGV:
+    case SIGBUS: //  addr, addr_lsb, addr_bnd
+        printf("addr %p addr_lsb %#x addr_bnd (%p, %p)\n",
+               si->si_addr,
+               si->si_addr_lsb,
+               si->si_lower,
+               si->si_upper
+            );
+        break;
+    case SIGPOLL: // band, fd
+        printf("band %ld fd %d\n",si->si_band, si->si_fd);
+        break;
+    case SIGSYS: // calladdr, syscall, arch
+        printf("call_addr %p syscall %d arch %x\n",
+               si->si_call_addr, si->si_syscall,
+               si->si_arch);
+        break;
+    }
+    printf("\n\n");
 }
 static void print_prog_info(void *mp){
     elf_prpsinfo_t *pi=get_note(mp,NT_PRPSINFO);
@@ -306,7 +362,7 @@ int main(int argc, char **argv){
     if(options.general_registers){
         print_regs(prs);
     }else{
-	printf("rip "REGFMT"\n",prs->regs.rip);
+        printf("rip "REGFMT"\n",prs->regs.rip);
     }
     if(options.prstatus){
         print_prstatus(prs);
