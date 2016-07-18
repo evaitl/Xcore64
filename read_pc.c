@@ -16,7 +16,9 @@
 
 
 static options_t options;
-
+/**
+   Say something, print errno, exit. 
+*/
 static void die(const char *fmt, ...){
     va_list ap;
     va_start(ap,fmt);
@@ -25,11 +27,17 @@ static void die(const char *fmt, ...){
     va_end(ap);
     exit(1);
 }
+/**
+   Helper function for assert macro.
+*/
 static inline void assert_helper(const char *file, int line, const char *str, int x){
     if(!x){
         die("Assert fail:%s:%d: %s", file, line, str);
     }
 }
+/**
+   open or die.
+*/
 static inline int Open(const char *fname, int flags, ...){
     va_list ap;
     va_start(ap,flags);
@@ -40,6 +48,12 @@ static inline int Open(const char *fname, int flags, ...){
     }
     return ret;
 }
+/*
+  \param fd an open fd
+  \return the length of the file.  
+
+  Get a file length from an open fd. 
+*/
 static inline size_t get_len(int fd){
     struct stat stat_buf;
     if(fstat(fd,&stat_buf)){
@@ -47,9 +61,13 @@ static inline size_t get_len(int fd){
     }
     return stat_buf.st_size;
 }
-#if 1
-void hexdump(void *p){
-    unsigned char *cp=p;
+
+
+/**
+   Debugging code. May use it for dumping things. 
+*/
+void hexdump(const void *p){
+    const unsigned char *cp=p;
     for(int i=0;i<0xb80; ++i){
         if( *(uint64_t *) &cp[i] == 0x400556){
             printf("rip offset %d\n",i);
@@ -66,7 +84,10 @@ void hexdump(void *p){
         cp+=16;
     }
 }
-#endif
+
+/**
+   mmap or die
+*/
 static inline void *Mmap(void *addr, size_t len, int prot,
                          int flags, int fd, off_t offset){
     void *ret=mmap(addr,len,prot,flags,fd,offset);
@@ -75,11 +96,17 @@ static inline void *Mmap(void *addr, size_t len, int prot,
     }
     return ret;
 }
+/**
+   munmap or die
+*/
 static inline void Munmap(void *addr, size_t len){
     if(munmap(addr,len)){
         die("munmap");
     }
 }
+/**
+   fstat or die
+*/
 static inline void Fstat(int fd, struct stat *buf){
     if(fstat(fd,buf)){
         die("fstat");
@@ -87,7 +114,8 @@ static inline void Fstat(int fd, struct stat *buf){
 }
 
 /*
-  Returns p rounded up to next 8.
+  \param p something to round up
+  \return  p rounded up to next 8.
 */
 static inline uint64_t roundup8(uint64_t p){
     if(p%8){
@@ -119,18 +147,18 @@ static inline uint64_t roundup8(uint64_t p){
     [Elf 64 object file format] (https://www.uclibc.org/docs/elf-64-gen.pdf)
 
 */
-static void *get_note(void *vp, int nt_type){
-    Elf64_Ehdr *eh=vp;
+static const void *get_note(const void *vp, int nt_type){
+    const Elf64_Ehdr *eh=vp;
     for(int i=0; i<eh->e_phnum; ++i){
-        Elf64_Phdr *ph=(vp+eh->e_phoff+i*eh->e_phentsize);
+        const Elf64_Phdr *ph=(vp+eh->e_phoff+i*eh->e_phentsize);
         if(ph->p_type!=PT_NOTE){
             continue;
         }
-        void *note_table=(vp + ph->p_offset);
-        void *note_table_end=(note_table+ph->p_filesz);
-        Elf64_Nhdr *current_note=note_table;
-        while(current_note<(Elf64_Nhdr *)note_table_end){
-            void *note_end=current_note;
+        const void *note_table=(vp + ph->p_offset);
+        const void *note_table_end=(note_table+ph->p_filesz);
+        const Elf64_Nhdr *current_note=note_table;
+        while(current_note<(const Elf64_Nhdr *)note_table_end){
+            const void *note_end=current_note;
             note_end += 3*sizeof(Elf64_Word);
             note_end += roundup8(current_note->n_namesz);
             if(current_note->n_type == nt_type){
@@ -143,9 +171,11 @@ static void *get_note(void *vp, int nt_type){
     }
     return 0;
 }
-
+/**
+   Say usage and die.
+*/
 static void usage(void){
-    die("usage: read_pc [-b] [-i] [-r] [-s] [-t] core\n"
+    die("usage: read_pc [-b] [-i] [-p] [-r] [-s] [-t] core\n"
         "    -f file headers\n"
         "    -b backtrace\n"
         "    -p program headers\n"
@@ -155,6 +185,12 @@ static void usage(void){
         "    -t program status\n"
         );
 }
+/**
+   \param argc 
+   \param argv
+
+   Good old fashion getopt....
+*/
 static void parse_options(int argc, char **argv){
     int opt;
     while((opt=getopt(argc, argv, "bfiprst"))!=-1){
@@ -188,7 +224,13 @@ static void parse_options(int argc, char **argv){
         usage();
     }
 }
-static void print_prstatus(elf_prstatus_t *prs){
+
+/**
+   \param prs what to print out. 
+
+   Prints out the prstatus structure. 
+*/
+static void print_prstatus(const elf_prstatus_t *prs){
     assert(prs);
     printf("Program status: \n");
     printf("signo %d signal code %d errno %d\n",
@@ -217,7 +259,10 @@ static void print_prstatus(elf_prstatus_t *prs){
     printf("\n\n");
 }
 
-static void print_regs(elf_prstatus_t *prs){
+/**
+   \param[in] prs The parameter to print. 
+*/
+static void print_regs(const elf_prstatus_t *prs){
     assert(prs);
     printf("General Registers: \n");
     printf("r15     " REGFMT "  ",prs->regs.r15);
@@ -266,13 +311,13 @@ static void print_regs(elf_prstatus_t *prs){
 
 /*
   \param addr The address we are interested in.
-
+  \param vp A pointer to the elf file. 
   \return Phdr for loadable segment that contains addr
- */
-static Elf64_Phdr *get_loaded_segment(void *vp,uint64_t addr){
-    Elf64_Ehdr *eh=vp;
+*/
+static const Elf64_Phdr *get_loaded_segment(const void *vp,uint64_t addr){
+    const Elf64_Ehdr *eh=vp;
     for(int i=0; i<eh->e_phnum; ++i){
-        Elf64_Phdr *ph=(vp+eh->e_phoff+i*eh->e_phentsize);
+        const Elf64_Phdr *ph=(vp+eh->e_phoff+i*eh->e_phentsize);
         if(ph->p_type!=PT_LOAD){
             continue;
         }
@@ -288,12 +333,12 @@ static Elf64_Phdr *get_loaded_segment(void *vp,uint64_t addr){
 /**
    Find a loaded segment containing rbp. Walk the segment printing rip
    and updating rbp with 0[rbp]. 
- */
-static void print_backtrace(void *mp){
+*/
+static void print_backtrace(const void *mp){
     assert(mp);
-    elf_prstatus_t *prs = get_note(mp,NT_PRSTATUS);
+    const elf_prstatus_t *prs = get_note(mp,NT_PRSTATUS);
     assert(prs);
-    Elf64_Phdr *ph=get_loaded_segment(mp, prs->regs.rbp);
+    const Elf64_Phdr *ph=get_loaded_segment(mp, prs->regs.rbp);
     printf("Backtrace: \n");
     if(!ph){
         printf("Can't backtrace from addr "REGFMT"\n",
@@ -319,11 +364,11 @@ static void print_backtrace(void *mp){
   sigaction_t union are actually being filled out. 
 
   Use at your own risk. 
- */
-static void print_signal_info(void *mp){
+*/
+static void print_signal_info(const void *mp){
     assert(mp);
     printf("Signal Information: \n");
-    siginfo_t *si=get_note(mp,NT_SIGINFO);
+    const siginfo_t *si=get_note(mp,NT_SIGINFO);
     assert(si);
     printf("signo: %d errno %d code %d\n",
            si->si_signo, si->si_errno, si->si_code);
@@ -371,8 +416,8 @@ static void print_signal_info(void *mp){
     }
     printf("\n\n");
 }
-static void print_prog_info(void *mp){
-    elf_prpsinfo_t *pi=get_note(mp,NT_PRPSINFO);
+static void print_prog_info(const void *mp){
+    const elf_prpsinfo_t *pi=get_note(mp,NT_PRPSINFO);
     if(!pi){
         die("no propsinfo");
     }
@@ -395,7 +440,7 @@ static void print_prog_info(void *mp){
     printf("\n\n");
 }
 
-static char *ph_type_str(int ptype){
+static const char *ph_type_str(int ptype){
     static char buf[50];
     switch(ptype){
     case PT_NULL: return "NULL";
@@ -417,7 +462,7 @@ static char *ph_type_str(int ptype){
     }
     return buf;
 }
-static char *ph_flags(int flags){
+static const char *ph_flags(int flags){
     static char buf[50];
     snprintf(buf,sizeof(buf),"%c%c%c",
              (flags & 0x01 ? 'R': ' '),
@@ -425,7 +470,7 @@ static char *ph_flags(int flags){
              (flags & 0x04 ? 'X': ' '));
     return buf;
 }
-static void print_ph(Elf64_Phdr *ph){
+static void print_ph(const Elf64_Phdr *ph){
     printf(" %-10s0x%016lx 0x%016lx %016lx\n"
            "           0x%016lx 0x%016lx %-6s"
            "  0x%06lx\n",
@@ -435,15 +480,15 @@ static void print_ph(Elf64_Phdr *ph){
            ph_flags(ph->p_flags),ph->p_align);
 }
 
-static void print_segments(void *vp){
+static void print_segments(const void *vp){
     printf("Program Headers:\n");
-     Elf64_Ehdr *eh=vp;
-     printf("%-10s   %-18s %-18s %-18s\n",
-            "   Type", "Offset", "Virt Addr", "PhysAddr");
-     printf("%-10s   %-18s %-18s %-18s\n",
-            "  ", "FileSiz", "MemSize", "  Flags  Align");
-     for(int i=0; i<eh->e_phnum; ++i){
-        Elf64_Phdr *ph=(vp+eh->e_phoff+i*eh->e_phentsize);
+    const Elf64_Ehdr *eh=vp;
+    printf("%-10s   %-18s %-18s %-18s\n",
+           "   Type", "Offset", "Virt Addr", "PhysAddr");
+    printf("%-10s   %-18s %-18s %-18s\n",
+           "  ", "FileSiz", "MemSize", "  Flags  Align");
+    for(int i=0; i<eh->e_phnum; ++i){
+        const Elf64_Phdr *ph=(vp+eh->e_phoff+i*eh->e_phentsize);
         print_ph(ph);
     }
 }
@@ -465,9 +510,9 @@ static char *hexstr(const unsigned char *cp){
   Unfinished. Prints the elf file header. 
 
   TODO: Make this look pretty. 
- */
-static void print_file(void *vp){
-    Elf64_Ehdr *eh=vp;
+*/
+static void print_file(const void *vp){
+    const Elf64_Ehdr *eh=vp;
     
     printf("File header:\n");
     printf("%-10s %s\n",
@@ -500,6 +545,17 @@ static void print_file(void *vp){
            "shstrndx:",eh->e_shstrndx);
     printf("\n\n");
 }
+static void check_file(const void *mp){
+    // magic for 64 bit little endian elf. 
+    static char magic_ident[]="\x7f""ELF\x02\x01\x01";
+    if(memcmp(magic_ident, mp, 7)){
+        die("Not a x86_64 elf file.");
+    }
+    const Elf64_Ehdr *eh=mp;
+    if(eh->e_type != ET_CORE){
+        die("Not a core file");
+    }
+}
 /*
   Get and print the pc of a core dump. Assumes an x86_64 linux core file. 
 */
@@ -510,12 +566,8 @@ int main(int argc, char **argv){
     Fstat(fd,&stat_buf);
     size_t len=get_len(fd);
     void *mp=Mmap(0,len,PROT_READ,MAP_PRIVATE,fd,0);
-    // magic for 64 bit little endian elf. 
-    static char magic_ident[]="\x7f""ELF\x02\x01\x01";
-    if(memcmp(magic_ident, mp, 7)){
-        die("Not a x86_64 elf file.");
-    }
-    elf_prstatus_t * prs = get_note(mp,NT_PRSTATUS);
+    check_file(mp);
+    const elf_prstatus_t * prs = get_note(mp,NT_PRSTATUS);
     if(!prs){
         die("No prstatus note found. ");
     }

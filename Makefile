@@ -16,4 +16,4 @@ read_pc: read_pc.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 clean:
-	-rm -f read_pc.o read_pc
+	-rm -f read_pc.o read_pc foo core
