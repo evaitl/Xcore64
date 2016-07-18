@@ -94,6 +94,8 @@ typedef struct options_t {
     int signal_info;
     int prog_info;
     int backtrace;
+    int segments;
+    int file_headers;
 }options_t;
 #define assert(x) assert_helper(__FILE__, __LINE__, #x, ((int)(intptr_t)(x)))
 #define REGFMT "0x%018llx"

@@ -120,11 +120,6 @@ static inline uint64_t roundup8(uint64_t p){
 
 */
 static void *get_note(void *vp, int nt_type){
-    // magic for 64 bit little endian elf. 
-    static char magic_ident[]="\x7f""ELF\x02\x01\x01";
-    if(memcmp(magic_ident, vp, 7)){
-        die("Not correct elf.");
-    }
     Elf64_Ehdr *eh=vp;
     for(int i=0; i<eh->e_phnum; ++i){
         Elf64_Phdr *ph=(vp+eh->e_phoff+i*eh->e_phentsize);
@@ -151,7 +146,9 @@ static void *get_note(void *vp, int nt_type){
 
 static void usage(void){
     die("usage: read_pc [-b] [-i] [-r] [-s] [-t] core\n"
+	"    -f file headers\n"
         "    -b backtrace\n"
+	"    -p program headers\n"
         "    -i program info\n"
         "    -r general registers\n"
         "    -s signal info\n"
@@ -160,19 +157,25 @@ static void usage(void){
 }
 static void parse_options(int argc, char **argv){
     int opt;
-    while((opt=getopt(argc, argv, "irsbt"))!=-1){
+    while((opt=getopt(argc, argv, "bfiprst"))!=-1){
         switch(opt){
+        case 'b':
+            options.backtrace=1;
+            break;
+	case 'f':
+	    options.file_headers=1;
+	    break;
+        case 'i':
+            options.prog_info=1;
+            break;
+        case 'p':
+            options.segments = 1;
+            break;
         case 'r':
             options.general_registers=1;
             break;
         case 's':
             options.signal_info=1;
-            break;
-        case 'i':
-            options.prog_info=1;
-            break;
-        case 'b':
-            options.backtrace=1;
             break;
         case 't':
             options.prstatus=1;
@@ -260,8 +263,43 @@ static void print_regs(elf_prstatus_t *prs){
 
     printf("\n\n");
 }
+
+/*
+  \param addr The address we are interested in.
+
+  \return Phdr for loadable segment that contains addr
+ */
+static Elf64_Phdr *get_loaded_segment(void *vp,uint64_t addr){
+    Elf64_Ehdr *eh=vp;
+    for(int i=0; i<eh->e_phnum; ++i){
+        Elf64_Phdr *ph=(vp+eh->e_phoff+i*eh->e_phentsize);
+        if(ph->p_type!=PT_LOAD){
+            continue;
+        }
+	uint64_t lower_bound=ph->p_vaddr;
+	uint64_t upper_bound=ph->p_vaddr + ph->p_filesz;
+	if(addr >= lower_bound && addr<=upper_bound){
+	    return ph;
+	}
+    }
+    return 0;
+}
+
 static void print_backtrace(void *mp){
     assert(mp);
+    elf_prstatus_t *prs = get_note(mp,NT_PRSTATUS);
+    assert(prs);
+    Elf64_Phdr *ph=get_loaded_segment(mp,
+				      prs->regs.rbp);
+    printf("Backtrace: \n");
+    if(!ph){
+	printf("Can't backtrace from addr "REGFMT"\n",
+	       prs->regs.rbp);
+    }
+    printf("offset %lx vaddr %lx\n",
+	   ph->p_offset, ph->p_vaddr);
+    printf("Working on this still....Come back soon.\n");
+    // XXX
 }
 /*
   This one is problematic. I'm guessing from the sigaction manpage,
@@ -344,6 +382,112 @@ static void print_prog_info(void *mp){
 
     printf("\n\n");
 }
+
+static char *ph_type_str(int ptype){
+    static char buf[50];
+    switch(ptype){
+    case PT_NULL: return "NULL";
+    case PT_LOAD: return "LOAD";
+    case PT_DYNAMIC: return "DYNAMIC";
+    case PT_INTERP: return "INTERP";
+    case PT_NOTE: return "NOTE";
+    case PT_SHLIB: return "SHLIB";
+    case PT_PHDR: return "PHDR";
+    case PT_TLS: return "TLS";
+    case	PT_NUM: return "NUM";
+    case PT_LOOS: return "LOOS";
+    case PT_GNU_EH_FRAME: return "EH_FRAME";
+    case PT_GNU_STACK: return "STACK";
+    case PT_GNU_RELRO: return "RELRO";
+    case PT_HIOS: return "HIOS";
+    default:
+	snprintf(buf,sizeof(buf),"%#x",ptype);
+    }
+    return buf;
+}
+static char *ph_flags(int flags){
+    static char buf[50];
+    snprintf(buf,sizeof(buf),"%c%c%c",
+	     (flags & 0x01 ? 'R': ' '),
+	     (flags & 0x02 ? 'W': ' '),
+	     (flags & 0x04 ? 'X': ' '));
+    return buf;
+}
+static void print_ph(Elf64_Phdr *ph){
+    printf(" %-10s0x%016lx 0x%016lx %016lx\n"
+	   "           0x%016lx 0x%016lx %-6s"
+	   "  0x%06lx\n",
+	   ph_type_str(ph->p_type),
+	   ph->p_offset, ph->p_vaddr, ph->p_paddr,
+	   ph->p_filesz, ph->p_memsz, 
+	   ph_flags(ph->p_flags),ph->p_align);
+}
+
+static void print_segments(void *vp){
+    printf("Program Headers:\n");
+     Elf64_Ehdr *eh=vp;
+     printf("%-10s   %-18s %-18s %-18s\n",
+	    "   Type", "Offset", "Virt Addr", "PhysAddr");
+     printf("%-10s   %-18s %-18s %-18s\n",
+	    "  ", "FileSiz", "MemSize", "  Flags  Align");
+     for(int i=0; i<eh->e_phnum; ++i){
+        Elf64_Phdr *ph=(vp+eh->e_phoff+i*eh->e_phentsize);
+	print_ph(ph);
+    }
+}
+static char *hexstr(const unsigned char *cp){
+    static char buf[80];
+    snprintf(buf,sizeof(buf),
+	     "%02x %02x %02x %02x "
+	     "%02x %02x %02x %02x "
+	     "%02x %02x %02x %02x "
+	     "%02x %02x %02x %02x",
+	     cp[0],cp[1],cp[2],cp[3],
+	     cp[4],cp[5],cp[6],cp[7],
+	     cp[8],cp[9],cp[10],cp[11],
+	     cp[12],cp[13],cp[14],cp[15]);
+    return buf;
+}
+
+/*
+  Unfinished. Prints the elf file header. 
+
+  TODO: Make this look pretty. 
+ */
+static void print_file(void *vp){
+    Elf64_Ehdr *eh=vp;
+    
+    printf("File header:\n");
+    printf("%-10s %s\n",
+	   "Magic:", hexstr(eh->e_ident));
+    printf("%-30s %d\n",
+	   "Type:",eh->e_type);
+    printf("%-30s %d\n",
+	   "Machine:",eh->e_machine);
+    printf("%-30s %d\n",
+	   "Version:",eh->e_version);
+    printf("%-30s %ld\n",
+	   "Entry:",eh->e_entry);
+    printf("%-30s %ld\n",
+	   "phoff:",eh->e_phoff);
+    printf("%-30s %ld\n",
+	   "shoff:",eh->e_shoff);
+    printf("%-30s %d\n",
+	   "Flags:",eh->e_flags);
+    printf("%-30s %d\n",
+	   "Elf Header Size:",eh->e_ehsize);
+    printf("%-30s %d\n",
+	   "phentsize:",eh->e_phentsize);
+    printf("%-30s %d\n",
+	   "phnum:",eh->e_phnum);
+    printf("%-30s %d\n",
+	   "shentsize:",eh->e_shentsize);
+    printf("%-30s %d\n",
+	   "shnum:",eh->e_shnum);
+    printf("%-30s %d\n",
+	   "shstrndx:",eh->e_shstrndx);
+    printf("\n\n");
+}
 /*
   Get and print the pc of a core dump. Assumes an x86_64 linux core file. 
 */
@@ -354,7 +498,11 @@ int main(int argc, char **argv){
     Fstat(fd,&stat_buf);
     size_t len=get_len(fd);
     void *mp=Mmap(0,len,PROT_READ,MAP_PRIVATE,fd,0);
-
+    // magic for 64 bit little endian elf. 
+    static char magic_ident[]="\x7f""ELF\x02\x01\x01";
+    if(memcmp(magic_ident, mp, 7)){
+        die("Not a x86_64 elf file.");
+    }
     elf_prstatus_t * prs = get_note(mp,NT_PRSTATUS);
     if(!prs){
         die("No prstatus note found. ");
@@ -375,6 +523,12 @@ int main(int argc, char **argv){
     }
     if(options.backtrace){
         print_backtrace(mp);
+    }
+    if(options.file_headers){
+	print_file(mp);
+    }
+    if(options.segments){
+	print_segments(mp);
     }
     assert(prs!=0);
     Munmap(mp,len);

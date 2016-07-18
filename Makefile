@@ -7,7 +7,10 @@ LIBS:=-lelf
 %.o: %.c
 	$(CC) $(CFLAGS) -c $<
 
-all: read_pc
+all: read_pc foo
+
+foo: foo.c
+	$(CC) -O0 -o $@ $<
 
 read_pc: read_pc.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
