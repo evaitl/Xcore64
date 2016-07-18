@@ -11,15 +11,11 @@
 #include <fcntl.h>
 #include <stdarg.h>
 
-//#include <linux/elfcore.h>
 #include "read_pc.h"
 
-#define assert(x) assert_helper(__FILE__, __LINE__, #x, (int)(x))
 
-static void usage(void){
-    printf("usage: read_pc core");
-    exit(1);
-}
+static options_t options;
+
 static void die(const char *fmt, ...){
     va_list ap;
     va_start(ap,fmt);
@@ -28,7 +24,7 @@ static void die(const char *fmt, ...){
     va_end(ap);
     exit(1);
 }
-static void assert_helper(const char *file, int line, const char *str, int x){
+static inline void assert_helper(const char *file, int line, const char *str, int x){
     if(!x){
         die("Assert fail:%s:%d: %s", file, line, str);
     }
@@ -39,19 +35,19 @@ static inline int Open(const char *fname, int flags, ...){
     int mode=va_arg(ap,int);
     int ret=open(fname, flags, mode);
     if (ret==-1){
-        die("open error");
+        die("Couldn't open file '%s':",fname);
     }
     return ret;
 }
-static size_t get_len(int fd){
+static inline size_t get_len(int fd){
     struct stat stat_buf;
     if(fstat(fd,&stat_buf)){
         die("fstat");
     }
     return stat_buf.st_size;
 }
-
-void hexdump(void *p){
+#if 0
+static void hexdump(void *p){
     unsigned char *cp=p;
     for(int i=0;i<0xb80; ++i){
         if( *(uint64_t *) &cp[i] == 0x400556){
@@ -69,20 +65,21 @@ void hexdump(void *p){
         cp+=16;
     }
 }
-static void *Mmap(void *addr, size_t len, int prot,
-                  int flags, int fd, off_t offset){
+#endif
+static inline void *Mmap(void *addr, size_t len, int prot,
+                         int flags, int fd, off_t offset){
     void *ret=mmap(addr,len,prot,flags,fd,offset);
     if(ret==MAP_FAILED){
         die("mmap");
     }
     return ret;
 }
-static void Munmap(void *addr, size_t len){
+static inline void Munmap(void *addr, size_t len){
     if(munmap(addr,len)){
         die("munmap");
     }
 }
-static void Fstat(int fd, struct stat *buf){
+static inline void Fstat(int fd, struct stat *buf){
     if(fstat(fd,buf)){
         die("fstat");
     }
@@ -91,7 +88,7 @@ static void Fstat(int fd, struct stat *buf){
 /*
   Returns p rounded up to next 8.
 */
-static uint64_t roundup8(uint64_t p){
+static inline uint64_t roundup8(uint64_t p){
     if(p%8){
         return p+8-p%8;
     }
@@ -121,11 +118,11 @@ static uint64_t roundup8(uint64_t p){
     [Elf 64 object file format] (https://www.uclibc.org/docs/elf-64-gen.pdf)
 
 */
-void *get_note(void *vp, int nt_type){
+static void *get_note(void *vp, int nt_type){
     // magic for 64 bit little endian elf. 
-    char magic_ident[]="\x7f""ELF\x02\x01\x01";
+    static char magic_ident[]="\x7f""ELF\x02\x01\x01";
     if(memcmp(magic_ident, vp, 7)){
-        die("Not correct elf. ");
+        die("Not correct elf.");
     }
     Elf64_Ehdr *eh=vp;
     for(int i=0; i<eh->e_phnum; ++i){
@@ -142,6 +139,7 @@ void *get_note(void *vp, int nt_type){
             note_end += roundup8(current_note->n_namesz);
             if(current_note->n_type == nt_type){
                 return note_end;
+                
             }
             note_end += roundup8(current_note->n_descsz);
             current_note=note_end;          
@@ -150,32 +148,179 @@ void *get_note(void *vp, int nt_type){
     return 0;
 }
 
+static void usage(void){
+    die("usage: read_pc [-b] [-i] [-r] [-s] [-t] core\n"
+        "    -b backtrace\n"
+        "    -i program info\n"
+        "    -r general registers\n"
+        "    -s signal info\n"
+        "    -t program status\n"
+        );
+}
+static void parse_options(int argc, char **argv){
+    int opt;
+    while((opt=getopt(argc, argv, "irsbt"))!=-1){
+        switch(opt){
+        case 'r':
+            options.general_registers=1;
+            break;
+        case 's':
+            options.signal_info=1;
+            break;
+        case 'i':
+            options.prog_info=1;
+            break;
+        case 'b':
+            options.backtrace=1;
+            break;
+        case 't':
+            options.prstatus=1;
+            break;
+        default:
+            usage();
+        }
+    }
+    if(argc-optind !=1){
+	usage();
+    }
+}
+static void print_prstatus(elf_prstatus_t *prs){
+    assert(prs);
+    printf("Program status: \n");
+    printf("signo %d signal code %d errno %d\n",
+	   prs->pr_info.si_signo, 
+	   prs->pr_info.si_code, 
+	   prs->pr_info.si_errno);
+    printf("cursig %d sigpend %#018lx sigheld %#018lx\n",
+	   prs->pr_cursig,
+	   prs->pr_sigpend,
+	   prs->pr_sighold);
+    printf("pid %d ppid %d pgrp %d sid %d\n",
+	   prs->pr_pid,prs->pr_ppid,
+	   prs->pr_pgrp,prs->pr_sid);
+    // times...
+    printf("utime: %ld.%06ld stime %ld.%06ld\n",
+	   prs->pr_utime.tv_sec,
+	   prs->pr_utime.tv_usec,
+	   prs->pr_stime.tv_sec,
+	   prs->pr_stime.tv_usec);
+    printf("cutime: %ld.%06ld cstime %ld.%06ld\n",
+	   prs->pr_cutime.tv_sec,
+	   prs->pr_cutime.tv_usec,
+	   prs->pr_cstime.tv_sec,
+	   prs->pr_cstime.tv_usec);
+    printf("fpvalid: %d\n",prs->pr_fpvalid);
+    printf("\n\n");
+}
+
+static void print_regs(elf_prstatus_t *prs){
+    assert(prs);
+    printf("General Registers: \n");
+    printf("r15     " REGFMT "  ",prs->regs.r15);
+    printf("r14     " REGFMT "  ",prs->regs.r14);
+    putchar('\n');
+    printf("r13     " REGFMT "  ",prs->regs.r13);
+    printf("r12     " REGFMT "  ",prs->regs.r12);
+    putchar('\n');
+    printf("rbp     " REGFMT "  ",prs->regs.rbp);
+    printf("rbx     " REGFMT "  ",prs->regs.rbx);
+    putchar('\n');
+    printf("r11     " REGFMT "  ",prs->regs.r11);
+    printf("r10     " REGFMT "  ",prs->regs.r10);
+    putchar('\n');
+    printf("r9      " REGFMT "  ",prs->regs.r9);
+    printf("r8      " REGFMT "  ",prs->regs.r8);
+    putchar('\n');
+    printf("rax     " REGFMT "  ",prs->regs.rax);
+    printf("rcx     " REGFMT "  ",prs->regs.rcx);
+    putchar('\n');
+    printf("rdx     " REGFMT "  ",prs->regs.rdx);
+    printf("rsi     " REGFMT "  ",prs->regs.rsi);
+    putchar('\n');
+    printf("rdi     " REGFMT "  ",prs->regs.rdi);
+    printf("ss      " REGFMT "  ",prs->regs.ss);
+    putchar('\n');
+    printf("rip     " REGFMT "  ",prs->regs.rip);
+    printf("cs      " REGFMT "  ",prs->regs.cs);
+    putchar('\n');
+    printf("eflags  " REGFMT "  ",prs->regs.eflags);
+    printf("rsp     " REGFMT "  ",prs->regs.rsp);
+    putchar('\n');
+    printf("fs_base " REGFMT "  ",prs->regs.fs_base);
+    printf("gs_base " REGFMT "  ",prs->regs.gs_base);
+    putchar('\n');
+    printf("ds      " REGFMT "  ",prs->regs.ds);
+    printf("es      " REGFMT "  ",prs->regs.es);
+    putchar('\n');
+    printf("fs      " REGFMT "  ",prs->regs.fs);
+    printf("gs      " REGFMT "  ",prs->regs.gs);
+    putchar('\n');
+    printf("orig_rax " REGFMT "  ",prs->regs.orig_rax);
+
+    printf("\n\n");
+}
+static void print_backtrace(void *mp){
+    assert(mp);
+}
+static void print_signal_info(void *mp){
+    assert(mp);
+}
+static void print_prog_info(void *mp){
+    elf_prpsinfo_t *pi=get_note(mp,NT_PRPSINFO);
+    if(!pi){
+        die("no propsinfo");
+    }
+    printf("Process Information:\n");
+    printf("state %d (%c) zombie %d nice %d flags %#lx\n"
+           "uid %d gid %d pid %d ppid %d pgrp %d sid %d\n"
+           "fname: %s\n"
+           "args: %s\n",
+           pi->pr_state,
+           pi->pr_sname,
+           pi->pr_zomb,
+           pi->pr_nice,
+           pi->pr_flag,
+           pi->pr_uid,
+           pi->pr_gid,
+           pi->pr_pid, pi->pr_ppid, pi->pr_pgrp, pi->pr_sid,
+           pi->pr_fname,
+           pi->pr_psargs);
+
+    printf("\n\n");
+}
 /*
   Get and print the pc of a core dump. Assumes an x86_64 linux core file. 
 */
 int main(int argc, char **argv){
-    if(argc !=2){
-        usage();
-    }    
-    int fd=Open(argv[1],O_RDONLY);
+    parse_options(argc, argv);
+    int fd=Open(argv[optind],O_RDONLY);
     struct stat stat_buf;
     Fstat(fd,&stat_buf);
     size_t len=get_len(fd);
     void *mp=Mmap(0,len,PROT_READ,MAP_PRIVATE,fd,0);
 
-    elf_prstatus * prs = get_note(mp,NT_PRSTATUS);
+    elf_prstatus_t * prs = get_note(mp,NT_PRSTATUS);
     if(!prs){
         die("No prstatus note found. ");
     }
+    if(options.general_registers){
+        print_regs(prs);
+    }else{
+	printf("rip "REGFMT"\n",prs->regs.rip);
+    }
+    if(options.prstatus){
+        print_prstatus(prs);
+    }
+    if(options.signal_info){
+        print_signal_info(mp);
+    }
+    if(options.prog_info){
+        print_prog_info(mp);
+    }
+    if(options.backtrace){
+        print_backtrace(mp);
+    }
     assert(prs!=0);
-        printf("rip %010llx rsp %010llx rbp %010llx eflags %010llx\n"
-	       "rax %010llx rbx %010llx rcx %010llx rdx %010llx\n",
-	       prs->pr_reg.rip, prs->pr_reg.rsp,
-	       prs->pr_reg.rbp, prs->pr_reg.eflags,
-	       prs->pr_reg.rax, prs->pr_reg.rbx,
-	       prs->pr_reg.rcx, prs->pr_reg.rdx);
-//    hexdump(&prstatus->pr_reg);
-    
     Munmap(mp,len);
     close(fd);
     printf("All worked\n");

@@ -1,5 +1,5 @@
 CC:=gcc
-CFLAGS:=-Wall -O2 -Werror
+CFLAGS:=-Wall -O3 -Werror
 LDFLAGS:=
 LIBS:=-lelf
 
