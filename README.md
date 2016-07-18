@@ -33,7 +33,6 @@ int foo(){
 int main(){
     return foo();
 }
-
 evaitl@bb ~/se/read_pc $ ./read_pc 
 usage: read_pc [-b] [-i] [-r] [-s] [-t] core
     -f file headers
@@ -43,8 +42,9 @@ usage: read_pc [-b] [-i] [-r] [-s] [-t] core
     -r general registers
     -s signal info
     -t program status
-    
-evaitl@bb ~/se/read_pc $ ./read_pc -bfiprst core 
+
+errno: Success
+evaitl@bb ~/se/read_pc $ ./read_pc -bfiprst core
 General Registers: 
 r15     0x000000000000000000  r14     0x000000000000000000  
 r13     0x0000007fffe05c9690  r12     0x000000000000400430  
@@ -83,8 +83,11 @@ args: ./foo bar bash no not bash pythonsh
 
 
 Backtrace: 
-offset 3a000 vaddr 7fffe05a9000
-Working on this still....Come back soon.
+rip = 0x000000000000400560
+rip = 0x000000000000400591
+rip = 0x0000000000004005a1
+
+
 File header:
 Magic:     7f 45 4c 46 02 01 01 00 00 00 00 00 00 00 00 00
 Type:                          4

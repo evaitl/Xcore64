@@ -47,16 +47,16 @@ static inline size_t get_len(int fd){
     }
     return stat_buf.st_size;
 }
-#if 0
-static void hexdump(void *p){
+#if 1
+void hexdump(void *p){
     unsigned char *cp=p;
     for(int i=0;i<0xb80; ++i){
         if( *(uint64_t *) &cp[i] == 0x400556){
             printf("rip offset %d\n",i);
         }
     }
-    for(int i=0; i<60; ++i){
-        printf("%08lx %02x %02x %02x %02x  %02x %02x %02x %02x "
+    for(int i=0; i<20; ++i){
+        printf("%08lx %02x %02x %02x %02x  %02x %02x %02x %02x    "
                "%02x %02x %02x %02x  %02x %02x %02x %02x\n",
                (unsigned long)((intptr_t)cp-(intptr_t)p),
                cp[0], cp[1], cp[2], cp[3], 
@@ -146,9 +146,9 @@ static void *get_note(void *vp, int nt_type){
 
 static void usage(void){
     die("usage: read_pc [-b] [-i] [-r] [-s] [-t] core\n"
-	"    -f file headers\n"
+        "    -f file headers\n"
         "    -b backtrace\n"
-	"    -p program headers\n"
+        "    -p program headers\n"
         "    -i program info\n"
         "    -r general registers\n"
         "    -s signal info\n"
@@ -162,9 +162,9 @@ static void parse_options(int argc, char **argv){
         case 'b':
             options.backtrace=1;
             break;
-	case 'f':
-	    options.file_headers=1;
-	    break;
+        case 'f':
+            options.file_headers=1;
+            break;
         case 'i':
             options.prog_info=1;
             break;
@@ -276,30 +276,42 @@ static Elf64_Phdr *get_loaded_segment(void *vp,uint64_t addr){
         if(ph->p_type!=PT_LOAD){
             continue;
         }
-	uint64_t lower_bound=ph->p_vaddr;
-	uint64_t upper_bound=ph->p_vaddr + ph->p_filesz;
-	if(addr >= lower_bound && addr<=upper_bound){
-	    return ph;
-	}
+        uint64_t lower_bound=ph->p_vaddr;
+        uint64_t upper_bound=ph->p_vaddr + ph->p_filesz;
+        if(addr >= lower_bound && addr<=upper_bound){
+            return ph;
+        }
     }
     return 0;
 }
 
+/**
+   Find a loaded segment containing rbp. Walk the segment printing rip
+   and updating rbp with 0[rbp]. 
+ */
 static void print_backtrace(void *mp){
     assert(mp);
     elf_prstatus_t *prs = get_note(mp,NT_PRSTATUS);
     assert(prs);
-    Elf64_Phdr *ph=get_loaded_segment(mp,
-				      prs->regs.rbp);
+    Elf64_Phdr *ph=get_loaded_segment(mp, prs->regs.rbp);
     printf("Backtrace: \n");
     if(!ph){
-	printf("Can't backtrace from addr "REGFMT"\n",
-	       prs->regs.rbp);
+        printf("Can't backtrace from addr "REGFMT"\n",
+               prs->regs.rbp);
     }
-    printf("offset %lx vaddr %lx\n",
-	   ph->p_offset, ph->p_vaddr);
-    printf("Working on this still....Come back soon.\n");
-    // XXX
+    uintptr_t lower_bound = (uintptr_t)(ph->p_offset);
+    uintptr_t upper_bound = (uintptr_t)(ph->p_offset+ph->p_filesz);
+    uintptr_t vrbp = prs->regs.rbp; // virtual rbp (addr in mem) 
+    uintptr_t frbp = vrbp - ph->p_vaddr + ph->p_offset; // file rbp (offset in file)
+    uintptr_t rip=prs->regs.rip;
+    assert(frbp >= lower_bound && frbp <= upper_bound);
+    while(frbp > lower_bound && frbp+8 <upper_bound){
+        printf("rip = "REGFMT"\n",(long long unsigned)rip);
+        rip = *(uintptr_t*)(frbp+mp+8);
+        vrbp = *(uintptr_t*)(frbp+mp);
+        frbp = vrbp - ph->p_vaddr + ph->p_offset;
+    }
+    printf("\n\n");
 }
 /*
   This one is problematic. I'm guessing from the sigaction manpage,
@@ -394,58 +406,58 @@ static char *ph_type_str(int ptype){
     case PT_SHLIB: return "SHLIB";
     case PT_PHDR: return "PHDR";
     case PT_TLS: return "TLS";
-    case	PT_NUM: return "NUM";
+    case        PT_NUM: return "NUM";
     case PT_LOOS: return "LOOS";
     case PT_GNU_EH_FRAME: return "EH_FRAME";
     case PT_GNU_STACK: return "STACK";
     case PT_GNU_RELRO: return "RELRO";
     case PT_HIOS: return "HIOS";
     default:
-	snprintf(buf,sizeof(buf),"%#x",ptype);
+        snprintf(buf,sizeof(buf),"%#x",ptype);
     }
     return buf;
 }
 static char *ph_flags(int flags){
     static char buf[50];
     snprintf(buf,sizeof(buf),"%c%c%c",
-	     (flags & 0x01 ? 'R': ' '),
-	     (flags & 0x02 ? 'W': ' '),
-	     (flags & 0x04 ? 'X': ' '));
+             (flags & 0x01 ? 'R': ' '),
+             (flags & 0x02 ? 'W': ' '),
+             (flags & 0x04 ? 'X': ' '));
     return buf;
 }
 static void print_ph(Elf64_Phdr *ph){
     printf(" %-10s0x%016lx 0x%016lx %016lx\n"
-	   "           0x%016lx 0x%016lx %-6s"
-	   "  0x%06lx\n",
-	   ph_type_str(ph->p_type),
-	   ph->p_offset, ph->p_vaddr, ph->p_paddr,
-	   ph->p_filesz, ph->p_memsz, 
-	   ph_flags(ph->p_flags),ph->p_align);
+           "           0x%016lx 0x%016lx %-6s"
+           "  0x%06lx\n",
+           ph_type_str(ph->p_type),
+           ph->p_offset, ph->p_vaddr, ph->p_paddr,
+           ph->p_filesz, ph->p_memsz, 
+           ph_flags(ph->p_flags),ph->p_align);
 }
 
 static void print_segments(void *vp){
     printf("Program Headers:\n");
      Elf64_Ehdr *eh=vp;
      printf("%-10s   %-18s %-18s %-18s\n",
-	    "   Type", "Offset", "Virt Addr", "PhysAddr");
+            "   Type", "Offset", "Virt Addr", "PhysAddr");
      printf("%-10s   %-18s %-18s %-18s\n",
-	    "  ", "FileSiz", "MemSize", "  Flags  Align");
+            "  ", "FileSiz", "MemSize", "  Flags  Align");
      for(int i=0; i<eh->e_phnum; ++i){
         Elf64_Phdr *ph=(vp+eh->e_phoff+i*eh->e_phentsize);
-	print_ph(ph);
+        print_ph(ph);
     }
 }
 static char *hexstr(const unsigned char *cp){
     static char buf[80];
     snprintf(buf,sizeof(buf),
-	     "%02x %02x %02x %02x "
-	     "%02x %02x %02x %02x "
-	     "%02x %02x %02x %02x "
-	     "%02x %02x %02x %02x",
-	     cp[0],cp[1],cp[2],cp[3],
-	     cp[4],cp[5],cp[6],cp[7],
-	     cp[8],cp[9],cp[10],cp[11],
-	     cp[12],cp[13],cp[14],cp[15]);
+             "%02x %02x %02x %02x "
+             "%02x %02x %02x %02x "
+             "%02x %02x %02x %02x "
+             "%02x %02x %02x %02x",
+             cp[0],cp[1],cp[2],cp[3],
+             cp[4],cp[5],cp[6],cp[7],
+             cp[8],cp[9],cp[10],cp[11],
+             cp[12],cp[13],cp[14],cp[15]);
     return buf;
 }
 
@@ -459,33 +471,33 @@ static void print_file(void *vp){
     
     printf("File header:\n");
     printf("%-10s %s\n",
-	   "Magic:", hexstr(eh->e_ident));
+           "Magic:", hexstr(eh->e_ident));
     printf("%-30s %d\n",
-	   "Type:",eh->e_type);
+           "Type:",eh->e_type);
     printf("%-30s %d\n",
-	   "Machine:",eh->e_machine);
+           "Machine:",eh->e_machine);
     printf("%-30s %d\n",
-	   "Version:",eh->e_version);
+           "Version:",eh->e_version);
     printf("%-30s %ld\n",
-	   "Entry:",eh->e_entry);
+           "Entry:",eh->e_entry);
     printf("%-30s %ld\n",
-	   "phoff:",eh->e_phoff);
+           "phoff:",eh->e_phoff);
     printf("%-30s %ld\n",
-	   "shoff:",eh->e_shoff);
+           "shoff:",eh->e_shoff);
     printf("%-30s %d\n",
-	   "Flags:",eh->e_flags);
+           "Flags:",eh->e_flags);
     printf("%-30s %d\n",
-	   "Elf Header Size:",eh->e_ehsize);
+           "Elf Header Size:",eh->e_ehsize);
     printf("%-30s %d\n",
-	   "phentsize:",eh->e_phentsize);
+           "phentsize:",eh->e_phentsize);
     printf("%-30s %d\n",
-	   "phnum:",eh->e_phnum);
+           "phnum:",eh->e_phnum);
     printf("%-30s %d\n",
-	   "shentsize:",eh->e_shentsize);
+           "shentsize:",eh->e_shentsize);
     printf("%-30s %d\n",
-	   "shnum:",eh->e_shnum);
+           "shnum:",eh->e_shnum);
     printf("%-30s %d\n",
-	   "shstrndx:",eh->e_shstrndx);
+           "shstrndx:",eh->e_shstrndx);
     printf("\n\n");
 }
 /*
@@ -525,10 +537,10 @@ int main(int argc, char **argv){
         print_backtrace(mp);
     }
     if(options.file_headers){
-	print_file(mp);
+        print_file(mp);
     }
     if(options.segments){
-	print_segments(mp);
+        print_segments(mp);
     }
     assert(prs!=0);
     Munmap(mp,len);
