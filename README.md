@@ -1,6 +1,8 @@
-## read_pc
+## Xcore64
 
-Simple program that mmaps a core file named on the command line and
+This is an [answer](http://stackoverflow.com/questions/38330622/get-the-address-that-caused-segmentation-fault-from-core-dump-using-c) to a stack overflow question about how to get the address that caused a core dump from C code. 
+
+This is a simple C program that mmaps a core file named on the command line and
 dumps a bunch of debug information.  Only for an x86_64 linux system.
 
 Very early stage, I'm gradually adding stuff that it dumps.
